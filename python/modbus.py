@@ -2,7 +2,11 @@ import socket
 import struct
 
 
+# https://github.com/sunspec/models/blob/master/json/model_1.json
+
+
 class Modbus:
+    # transforms the Value (uint16) to a list of bytes in modbus byte order.
     def _req_uint16(self, Value):
         return [(Value >> 8) & 0xFF, Value & 0xFF]   # high byte, low byte
 
@@ -26,8 +30,9 @@ class Modbus:
                 break
             Result += chr(Message[i])
         return Result
-    
-    
+
+    __unpack_invalid = { "f": struct.unpack("f", bytes([255, 255, 127, 255]))[0], "h": -32768, "H": 0xffff, "L": 0xffffffff, "Q": 0xffffffffffffffff }
+    __unpack_size = { "f": 4, "h": 2, "H": 2, "L": 4, "Q":8, "s": 1, "x": 1, " ": 0 }
     # decodes the byte message based on the format string
     # format: [n]s|c|f|h|H|L|Q    
     # if n is not specified, it defaults to 1
@@ -35,39 +40,39 @@ class Modbus:
         result = []
         while len(format) > 0:
             n = 0
+
             while len(format) > 0 and format[0] >= '0' and format[0] <= '9':
                 n = n * 10 + int(format[0])
                 format = format[1:]
             if n == 0:
                 n = 1
-            if format[0] == 's':
-                result.append(self._res_string(self._res_bytes(message[0:n])))
-                message = message[n:]
-            elif format[0] == 'f':
-                result += struct.unpack(str(n) + "f", bytes(message[0:n*4]))
-                message = message[n*4:]
-            elif format[0] == 'h':
-                result += struct.unpack(str(n) + "h", bytes(message[0:n*2]))
-                message = message[n*2:]
-            elif format[0] == 'H':
-                result += struct.unpack(str(n) + "H", bytes(message[0:n*2]))
-                message = message[n*2:]
-            elif format[0] == 'L':
-                result += struct.unpack(str(n) + "L", bytes(message[0:n*4]))
-                message = message[n*4:]
-            elif format[0] == 'Q':
-                result += struct.unpack(str(n) + "Q", bytes(message[0:n*8]))
-                message = message[n*8:]
-            elif format[0] == ' ':
-                pass
-            elif format[0] == 'x':
-                message = message[n:]
-            else:
+
+            nsize = self.__unpack_size.get(format[0])
+            if nsize is None:
                 raise ValueError("unknown format: " + format[0:])
+            invalid = self.__unpack_invalid.get(format[0])
+
+            if format[0] == 's':
+                # @@@ todp: empty strings start with 0x80
+                result.append(self._res_string(self._res_bytes(message[0:n])))
+            elif format[0] == ' ' or format[0] == 'x':
+                pass
+            else:
+                result_ = list(struct.unpack(str(n) + format[0], bytes(message)[0:n*nsize]))
+                for i in range(0, len(result_)):
+                    if result_[i] == invalid:
+                        result_[i] = None
+                result += result_
+            
             format = format[1:]
+            message = message[n*nsize:]
         return result
 
-
+    # creates a modbus read register request message
+    # MessageId: message ID (uint16)
+    # UnitId: unit ID (uint8)
+    # Address: register address (uint16)
+    # Length: number of registers (uint16)
     def __read_register_req(self, MessageId: int, UnitId: int, Address: int, Length: int):
         message = []
         message += self._req_uint16(MessageId)     # message ID
@@ -80,7 +85,10 @@ class Modbus:
         message += self._req_uint16(Length)        # number of registers   
         return message    
 
-
+    # decodes the modbus read register response message
+    # Message: message (byte array)
+    # expected message ID (uint16)
+    # UnitId: unit ID (uint8)
     def __read_register_res(self, Message, MessageId: int, UnitId: int):
         if len(Message) < 9:
             return None
@@ -102,7 +110,6 @@ class Modbus:
         ## swap high and low byte
         result = []
         for i in range(0, len(Message), 2):
-#            Message[i], Message[i + 1] = Message[i + 1], Message[i]
             result.append(Message[i + 1])
             result.append(Message[i])
         return result
@@ -115,7 +122,6 @@ class Modbus:
         messageId = 0x1248
         if formatsize == 0:
             return None
-        # message = self.modbus_read_register(0x1248, Configuration_UnitID, Address, formatsize)
         try:
             result = []
             while formatsize > 0:
@@ -129,8 +135,8 @@ class Modbus:
                 result += message
                 formatsize -= chunk
                 Address += chunk
-            unpack_from = self.unpack_from(Format, result)
-            return dict(zip(Labels, unpack_from))
+            values = self.unpack_from(Format, result)
+            return dict(zip(Labels, values))
         except:
             return None
 
@@ -150,29 +156,68 @@ class Modbus:
         self.s.close()
         self.s = None
 
- 
 
 class SunSpec(Modbus):
-       # @@@ address 50000, address 0
-       def SunSpec(self, Configuration_UnitID, Address):
-        message = self.read_register(0x1248, Configuration_UnitID, Address, 2)
-        sunspec = self._res_uint32(message[0:4])[0]
-
+    __sunspec_adresses = [0, 40000, 50000]
+    # retrieves the SunSpec IDs and the length of the SunSpec blocks
+    # the function returns a dictionary with the address as key and a tuple (blocktype, length) as value
+    # the blocktype is the SunSpec ID and the length is the length of the block in bytes
+    # the function returns None if the SunSpecAddress (0, 40000, 50000) is not found or no valid block is found
+    # the function will iterate over the SunSpec addresses (0, 40000, 50000) until a valid block is found if -1 is passed as SunSpecAddressId
+    def SunSpec(self, Configuration_UnitID, SunSpecAddressId = -1):
+        if SunSpecAddressId == -1:
+            for i in range(0, len(self.__sunspec_adresses)):
+                result = self.SunSpec(Configuration_UnitID, self.__sunspec_adresses[i])
+                if result is not None:
+                    return result
+            return None
+        
+        if SunSpecAddressId < 0 or SunSpecAddressId >= len(self.__sunspec_adresses):
+            return None
+        result = { }
+        Address = self.__sunspec_adresses[SunSpecAddressId]
+        message = self.read_register(Configuration_UnitID, Address, "L", ("C_SunSpec_ID", ))
         if message  is None:
             return None
-        if sunspec != 0x53756e53:
-            return (None)
+        sunspec = message["C_SunSpec_ID"]
+        if sunspec != 1850954613:
+            return None
 
-        Address = 40002
-        while Address != 0xffffffff:
-            message = self.read_register(0x100, Configuration_UnitID, Address, 2)
+        Address += 2
+        while Address < 0x10000:
+            message = self.read_register(Configuration_UnitID, Address, "HH", ("C_SunSpec_DID", "C_SunSpec_Length"))
 
-            blocktype = self._res_uint16(message[0:2])[0]
-            length = self._res_uint16(message[2:4])[0]
+            blocktype = message["C_SunSpec_DID"]
+            length =  message["C_SunSpec_Length"]
             if length == 0 or blocktype == 0xffff:
                 break
-            print(Address, "-", Address + length, " (", hex(Address), "-", hex(Address + length), "): blocktype", blocktype, " length", length)
+            result[Address] = (blocktype, length)
             Address += length + 2
+        return result
+    
+    # SunSpec DER701: DER AC Measurement
+    def DER701(self, Configuration_UnitID):
+        Address = 40295
+        block = self.read_register(Configuration_UnitID, Address, "HH HHHHLL hhhHh HHLQQQQ 9hH  hHHQQQQhhhHhHH4QhhhHhHH4QHL6h  4h16s", 
+            ("DERMeasureAC_ID", "DERMeasureAC_L", 
+            "DERMeasureAC_ACType", "DERMeasureAC_St", "DERMeasureAC_InvSt", "DERMeasureAC_ConnSt",  "DERMeasureAC_Alrm", 
+            "DERMeasureAC_DERMode", "DERMeasureAC_W",  "DERMeasureAC_VA", "DERMeasureAC_Var", "DERMeasureAC_PF", 
+            "DERMeasureAC_A", "DERMeasureAC_LLV", "DERMeasureAC_LNV", "DERMeasureAC_Hz",  "DERMeasureAC_TotWhInj", 
+            "DERMeasureAC_TotWhAbs", "DERMeasureAC_TotVarhInj", "DERMeasureAC_TotVarhAbs", "DERMeasureAC_TmpAmb", "DERMeasureAC_TmpCab", 
+            "DERMeasureAC_TmpSnk", "DERMeasureAC_TmpTrns", "DERMeasureAC_TmpSw", "DERMeasureAC_TmpOt", "DERMeasureAC_WL1", 
+            "DERMeasureAC_VAL1", "DERMeasureAC_VarL1", "DERMeasureAC_PFL1",
+            "DERMeasureAC_AL1", "DERMeasureAC_VL1L2", "DERMeasureAC_VL1", "DERMeasureAC_TotWhInjL1", "DERMeasureAC_TotWhAbsL1", 
+            "DERMeasureAC_TotVarhInjL1", "DERMeasureAC_TotVarhAbsL1",  "DERMeasureAC_WL2", "DERMeasureAC_VAL2", "DERMeasureAC_VarL2", 
+            "DERMeasureAC_PFL2", "DERMeasureAC_AL2", "DERMeasureAC_VL2L3", "DERMeasureAC_VL2", "DERMeasureAC_TotWhInjL2", 
+            "DERMeasureAC_TotWhAbsL2", "DERMeasureAC_TotVarhInjL2", "DERMeasureAC_TotVarhAbsL2", "DERMeasureAC_WL3", "DERMeasureAC_VAL3",  
+            "DERMeasureAC_VarL3", "DERMeasureAC_PFL3", "DERMeasureAC_AL3", "DERMeasureAC_VL3L1", "DERMeasureAC_VL3", "DERMeasureAC_TotWhInjL3", 
+            "DERMeasureAC_TotWhAbsL3", "DERMeasureAC_TotVarhInjL3", "DERMeasureAC_TotVarhAbsL3", "DERMeasureAC_ThrotPct", "DERMeasureAC_ThrotSrc", 
+            "DERMeasureAC_A_SF", "DERMeasureAC_V_SF", "DERMeasureAC_Hz_SF", "DERMeasureAC_W_SF", "DERMeasureAC_PF_SF", 
+            "DERMeasureAC_VA_SF", "DERMeasureAC_Var_SF", "DERMeasureAC_TotWh_SF", "DERMeasureAC_TotVarh_SF", "DERMeasureAC_Tmp_SF", 
+            "DERMeasureAC_MnAlrmInfo" ))
+        return block
+
+
 
 
 class SolarEdge(SunSpec):
@@ -200,6 +245,7 @@ class SolarEdge(SunSpec):
                 "I_Status", "I_Status_Vendor"))
         return block1 | block2
     
+
     def SmartMeter(self, UnitId, SmartMeterId):
         # @@@ 3phase inverters
         if SmartMeterId < 1 or SmartMeterId > 3:
@@ -225,6 +271,7 @@ class SolarEdge(SunSpec):
         if block["C_Manufacturer"] == "":
             return None
         return block
+    
     
     def Battery(self, UnitId, BatteryId):
         # @@@ 3phase inverters
@@ -258,5 +305,4 @@ class SolarEdge(SunSpec):
             "FgMin1", "FgMin1_HoldTime", "FgMin2", "FgMin2_HoldTime", "FgMin3", "FgMin3_HoldTime", "FgMin4", "FgMin4_HoldTime", "FgMin5", "FgMin5_HoldTime",
             "GRM_Time" ))
         return block
-
 
