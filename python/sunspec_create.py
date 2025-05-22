@@ -1,3 +1,4 @@
+# creates a sunSpec_specification class from GitHub SunSpec sources
 
 # Pre-requisites
 #   pip install PyGithub
@@ -13,15 +14,15 @@ import os
 from datetime import datetime, timezone
 from github import Github
 
-
+# optimize dstring by removing trailing padding
 def sunspec_remove_padding(dstring, names):
     while len(dstring) > 0 and dstring[-1] == "x":
         dstring = dstring[:-1]
         names = names[:-1]
     return dstring, names
 
+# connect to GitHub
 username = "dersecure"
-# Public Web Github
 g = Github()
 user = g.get_user(username)
 repo = g.get_repo("sunspec/Models")
@@ -29,9 +30,11 @@ repo = g.get_repo("sunspec/Models")
 code = ""
 current_utc_time = datetime.now(timezone.utc)
 
+# downlaod github repository (default branch)
 download_url = repo.get_archive_link("zipball", ref=repo.default_branch)
 response = requests.get(download_url)
 zipfile = zipfile.ZipFile(io.BytesIO(response.content))
+# process all files which belongs to the json folder and are valid models
 for zipinfo in zipfile.infolist():
     if zipinfo.is_dir():
         continue
@@ -134,6 +137,7 @@ for zipinfo in zipfile.infolist():
     code += "\", \"" + types 
     code += "\", [\"" + "\", \"".join(names) + "\"])" 
 
+# write code to sunspec_specification.py
 code = "# created by sunspec_create.py (" + str(current_utc_time) + ")\n"# source https://github.com/sunspec/models/tree/master/json \n\nclass SunSpec_Specification:\n\tSpecification = {\n" + code + "}\n"
 fd = os.open(os.path.dirname(os.path.abspath(__file__)) + "/sunspec_specification.py", os.O_CREAT | os.O_WRONLY, 0o666)
 os.write(fd, code.encode())
