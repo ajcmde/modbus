@@ -101,4 +101,4 @@ class SunSpec_Specification:
 	808: ("flow_battery_module", "HHH", ["ID", "L", "ModuleTBD"]),
 	809: ("flow_battery_stack", "HHH", ["ID", "L", "StackTBD"]),
 	9: ("model_9", "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHLHHHHHH", ["ID", "L", "CertUID", "CertRole", "Fmt", "Typ", "TotLn", "FrgLn", "Frg1", "Frg2", "Frg3", "Frg4", "Frg5", "Frg6", "Frg7", "Frg8", "Frg9", "Frg10", "Frg11", "Frg12", "Frg13", "Frg14", "Frg15", "Frg16", "Frg17", "Frg18", "Frg19", "Frg20", "Frg21", "Frg22", "Frg23", "Frg24", "Frg25", "Frg26", "Frg27", "Frg28", "Frg29", "Frg30", "Frg31", "Frg32", "Frg33", "Frg34", "Frg35", "Frg36", "Frg37", "Frg38", "Frg39", "Frg40", "Frg41", "Frg42", "Frg43", "Frg44", "Frg45", "Frg46", "Frg47", "Frg48", "Frg49", "Frg50", "Frg51", "Frg52", "Frg53", "Frg54", "Frg55", "Frg56", "Frg57", "Frg58", "Frg59", "Frg60", "Frg61", "Frg62", "Frg63", "Frg64", "Frg65", "Frg66", "Frg67", "Frg68", "Frg69", "Frg70", "Frg71", "Frg72", "Frg73", "Frg74", "Frg75", "Frg78", "Frg79", "Frg80", "Ts", "Ms", "Seq", "UID", "Role", "Alg", "N"])}
-"N"])}
+
