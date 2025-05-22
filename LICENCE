@@ -1,5 +1,5 @@
-This is free and unencumbered software released into the public domain with the exception of the following file: python/sunspec_specification.py - see 
-APACHE LICENCE.md for the lincing of the file.
+This is free and unencumbered software released into the public domain with the exception of the following 
+file: python/sunspec_specification.py which is derived from SunSpec.orgs' licence (https://github.com/sunspec/models/blob/master/LICENSE).
 
 Anyone is free to copy, modify, publish, use, compile, sell, or
 distribute this software, either in source code form or as a compiled
