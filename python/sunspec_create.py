@@ -13,13 +13,6 @@ import os
 from datetime import datetime, timezone
 from github import Github
 
-
-def sunspec_remove_padding(dstring, names):
-    while len(dstring) > 0 and dstring[-1] == "x":
-        dstring = dstring[:-1]
-        names = names[:-1]
-    return dstring, names
-
 username = "dersecure"
 # Public Web Github
 g = Github()
@@ -87,6 +80,7 @@ for zipinfo in zipfile.infolist():
                 size >>= 2
             elif type == "string":
                 type = "s"
+                size <<= 1 
             elif type == "pad":
                 type = "x"
             elif type == "eui48":
@@ -122,10 +116,6 @@ for zipinfo in zipfile.infolist():
             round = 2
         else:
             grouping = None   
-    
-    types, names = sunspec_remove_padding(types, names)
-    # print("names:", names)
-    # print("types:", types)
 
     if code != "":
         code += ",\n"
