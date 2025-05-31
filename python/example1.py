@@ -1,5 +1,6 @@
 
 import modbus
+from collections import namedtuple
 
 Configuration_UnitID = 1
 Configuration_IP = "wechselrichter1"
@@ -12,13 +13,13 @@ tcpmodbus.tcp_connect(Configuration_IP, Configuration_Port, Configuration_Timeou
 print("SunSpec")
 sunspec = tcpmodbus.SunSpec(Configuration_UnitID)
 print(sunspec)
+SunSpecBlocks = tcpmodbus.SunSpec(Configuration_UnitID)
+for Block in SunSpecBlocks:
+    print("------------------------------")
+    print("BlockId: ", Block.BlockId, " Address: ", Block.Address, " Length: ", Block.Length)
 
-
-print("Inverter 1")
-print(tcpmodbus.Inverter(Configuration_UnitID))
-
-print("Inverter 2")
-print(tcpmodbus.Inverter(Configuration_UnitID + 1))
+    print(tcpmodbus.read_sunspec_block(Configuration_UnitID, Block.Address, Block.BlockId))
+print("------------------------------")
 
 print("Smart Meter 1")
 print(tcpmodbus.SmartMeter(Configuration_UnitID, 1))
@@ -35,12 +36,4 @@ print(tcpmodbus.Battery(Configuration_UnitID, 2))
 print ("Grid Protection Trip Limits")
 print(tcpmodbus.GridProtectionTripLimits(Configuration_UnitID))
 
-print("DER701")
-print(tcpmodbus.DER701(Configuration_UnitID))
-
-
 tcpmodbus.tcp_close()
-
-
-
-   
