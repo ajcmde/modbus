@@ -1,5 +1,12 @@
 # modbus
 
+# tags 
+#MODBUS, #PYTHON
+
+# description
+provides functions to to read modbus register and SunSpec blocks. SolarEdge proprietary
+
+![image](https://github.com/user-attachments/assets/6a7f2fa0-8489-4190-88de-409a6dd247c5)
 
 # Test 
 
