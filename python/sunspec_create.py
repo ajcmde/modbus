@@ -85,22 +85,20 @@ for zipinfo in zipfile.infolist():
                 size = point["size"]
             if type == "int16" or type == "sunssf":
                 type = "h"
-                size = 1
             elif type == "uint16" or type == "bitfield16" or type == "enum16" or type == "acc16" or type == "raw16":
                 type = "H"
-                size >>= 1 
             elif type == "int32":
                 type = "l"
-                size >>= 2
+                size /= 2
             elif type == "uint32" or type == "bitfield32" or type == "acc32" or type == "enum32":
                 type = "L"
-                size >>= 2
+                size /= 2
             elif type == "int64":
                 type = "q"
-                size >>= 3
+                size /= 4
             elif type == "uint64" or type == "acc64" or type == "bitfield64":
                 type = "Q"
-                size >>= 3
+                size /= 4
             elif type == "float32":
                 type = "f"
                 size >>= 2
@@ -111,7 +109,7 @@ for zipinfo in zipfile.infolist():
                 type = "x"
             elif type == "eui48":
                 type = "c"
-                size *= 6
+                size *= 3
             elif type == "ipv6addr":
                 type = "c"
                 size *= 16
@@ -132,7 +130,11 @@ for zipinfo in zipfile.infolist():
             if size > 1:
                 types += str(size)
             types += type
-            names.append(point["name"]) 
+            if "units" in point:
+                units = "[" + point["units"] + "]"
+            else:
+                units = ""
+            names.append(point["name"] + units) 
         if count == 1 and round == 1:
             # add padding for count
             types += "_"
