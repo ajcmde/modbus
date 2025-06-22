@@ -85,13 +85,13 @@ class Modbus:
 
     # transforms the byte message to a list of bytes.
     # if the message is empty or None, it returns None
-    def __res_bytes(self, Message):
+    def __res_words(self, Message):
         if Message is None or len(Message) == 0:
             return None
         for i in range(0, len(Message), 2):
             Message[i], Message[i + 1] = Message[i + 1], Message[i]
-        return bytes(Message)
-    
+        return bytes(Message)  
+
     # transforms the byte message to a string. the end of string is marked by a 0 byte or the end of the message.
     # if the message is empty or None, it returns None
     def __res_string(self, Message):
@@ -105,9 +105,10 @@ class Modbus:
         return Result
 
     __unpack_invalid = { "f": struct.unpack("f", bytes([255, 255, 127, 255]))[0], "h": -32768, "H": 0xffff, "l":-2147483648, "L": 0xffffffff, "q": -9223372036854775808, "Q": 0xffffffffffffffff }
-    __unpack_size = { "f": 4, "h": 2, "H": 2, "l": 4, "L": 4, "q": 8, "Q": 8, "s": 1, "x": 1, " ": 0 }
+    __unpack_size = { "B": 1, "f": 4, "h": 2, "H": 2, "l": 4, "L": 4, "q": 8, "Q": 8, "s": 1, "x": 1, " ": 0 }
+    # @todo add support for _ (count) type
     # @brief decodes the byte message based on the format string
-    # format: ([n]{s|c|f|h|H|l|L|q|Q})+    
+    # format: ([n]{B|s|c|f|h|H|l|L|q|Q})+    
     # if n is not specified, it defaults to 1
     def __unpack_from(self, format, message):
         result = []
@@ -128,17 +129,23 @@ class Modbus:
                 raise ValueError("unknown format: " + format[0:])
             invalid = self.__unpack_invalid.get(format[0])
 
+            # print (format[0], message[0:n*nsize])
+            
             if format[0] == 's':
                 if message[1] == 0x80: # emtpy string
                     result.append("")
                 else:
-                    result.append(self.__res_string(self.__res_bytes(message[0:n])))
+                    result.append(self.__res_string(message[0:n]))
+            elif format[0] == 'B':
+                result += list(message[0:n*nsize])
             elif format[0] == ' ' or format[0] == 'x':
                 # ignore blanks and padding (registers)
                 pass
             else:
-                # unpack data
-                result_ = list(struct.unpack(str(n) + format[0], bytes(message)[0:n*nsize]))
+                if format[0] == 'f':
+                    result_ = list(struct.unpack("<" + str(n) + format[0], self.__res_words(message[0:n*nsize])))
+                else:
+                    result_ = list(struct.unpack("!" + str(n) + format[0], bytes(message[0:n*nsize])))
                 for i in range(0, len(result_)):
                     if result_[i] == invalid:
                         result_[i] = None
@@ -187,15 +194,15 @@ class Modbus:
         if dataLength + 3 > messageLength:         # data length
             return None 
         Message = Message[9:]
-        ## swap high and low byte
-        result = []
-        for i in range(0, len(Message), 2):
-            result.append(Message[i + 1])
-            result.append(Message[i])
-        return result
+#        ## swap high and low byte
+#        result = []
+#        for i in range(0, len(Message), 2):
+#            result.append(Message[i + 1])
+#            result.append(Message[i])
+#        return result
+        return Message
 
-
-    # @@@ todo enable tcp/rs485/... mode
+    # @todo support rs485
     # @brief Reads a registers from the device defined by the Format string. returns a dictionary with the labels as keys and the register 
     # register values as values.
     # @param UnitId: the unit ID of the device
@@ -223,6 +230,8 @@ class Modbus:
             result += message
             formatsize -= chunk
             Address += chunk
+        # decode the result into network byte order
+        ## result = self.__res_bytes(result)
         #decode the byte message
         values = self.__unpack_from(Format, result)
         return dict(zip(Labels, values))
@@ -242,6 +251,7 @@ class Modbus:
     def tcp_close(self):
         self.s.close()
         self.s = None
+
 
 class SunSpec(Modbus, SunSpec_Specification):
     # SunSpec's addresses
@@ -274,14 +284,14 @@ class SunSpec(Modbus, SunSpec_Specification):
             return self.__sunspec_blocks_cache[Configuration_UnitID]; 
     
         Address = self.__sunspec_adresses[SunSpecAddressId]
-        message = self.ReadRegister(Configuration_UnitID, Address, "L", ("C_SunSpec_ID", ))
+        message = self.ReadRegister(Configuration_UnitID, Address, "4s", ("C_SunSpec_ID", ))
         if message is None:
             # stop if the message is None
             return None
         # the message must contain the SunSpec ID
         sunspec = message["C_SunSpec_ID"]
-        if sunspec != 1850954613:
-            return None
+        if sunspec != "SunS":
+             return None
         Address += 2
         
         result = []
@@ -354,7 +364,7 @@ class SolarEdge(SunSpec):
         if block1["C_Manufacturer"] == "":
             return None
         block2 = self.ReadRegister(UnitId, Address + 0x42, 
-            "5f 64x 5f QQ 4f LL 8H8H",  
+            "5f 64x 5f QQ 4f xBxxL 8H8H",  
             ("RatedEnergy", "MaxChargeContinuesPower", "MaxDischargeContinuesPower", "MaxChargePeakPower", "MaxDischargePeakPower",
                 "AverageTemperature", "MaxTemperature", "InstantaneousVoltage", "InstantaneousCurrent", "InstantaneousPower",
                 "LifetimeExportEnergyCounter", "LifetimeImportEnergyCounter",
@@ -377,4 +387,3 @@ class SolarEdge(SunSpec):
             "FgMin1", "FgMin1_HoldTime", "FgMin2", "FgMin2_HoldTime", "FgMin3", "FgMin3_HoldTime", "FgMin4", "FgMin4_HoldTime", "FgMin5", "FgMin5_HoldTime",
             "GRM_Time" ))
         return block
-
