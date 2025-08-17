@@ -92,7 +92,7 @@ class Modbus:
             Message[i], Message[i + 1] = Message[i + 1], Message[i]
         return bytes(Message)  
 
-    # transforms the byte message to a string. the end of string is marked by a 0 byte or the end of the message.
+    # @brief transforms the byte message to a string. the end of string is marked by a 0 byte or the end of the message.
     # if the message is empty or None, it returns None
     def __res_string(self, Message):
         if Message is None or len(Message) == 0:
@@ -104,56 +104,71 @@ class Modbus:
             Result += chr(Message[i])
         return Result
 
-    __unpack_invalid = { "f": struct.unpack("f", bytes([255, 255, 127, 255]))[0], "h": -32768, "H": 0xffff, "l":-2147483648, "L": 0xffffffff, "q": -9223372036854775808, "Q": 0xffffffffffffffff }
-    __unpack_size = { "B": 1, "f": 4, "h": 2, "H": 2, "l": 4, "L": 4, "q": 8, "Q": 8, "s": 1, "x": 1, " ": 0 }
-    # @todo add support for _ (count) type
-    # @brief decodes the byte message based on the format string
-    # format: ([n]{B|s|c|f|h|H|l|L|q|Q})+    
+    __DefinitionRegister = namedtuple("DefinitionRegister", ["name", "type", "length"])
+    __UnpackNotImplemented = {
+        "int16": [0x80, 0x00], 
+        "uint16": [0xff, 0xff], 
+        "acc16": [0x00, 0x00], 
+        "enum16": [0xff, 0xff], 
+        "bitfield16": [0xff, 0xff], 
+        "pad": [0x80, 0x00],
+        "int32": [0x80, 0x00, 0x00, 0x00], 
+        "uint32": [0xff, 0xff, 0xff, 0xff], 
+        "acc32": [0x00, 0x00, 0x00, 0x00], 
+        "enum32": [0xff, 0xff, 0xff, 0xff], 
+        "bitfield32": [0xff, 0xff, 0xff, 0xff], 
+        "int64": [0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], 
+        "uint64": [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], 
+        "acc64" : [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        "float32": [0xff, 0xff, 0x7f, 0xff],
+        "float64": [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f, 0xff],
+        "string": [0x00, 0x80],
+        "sunssf": [0x80, 0x00], 
+        "ipaddr": [0, 0, 0, 0],
+        "ipv6addr": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+     }
+    __UnpackStructFormat = {
+        "int16": "h", "uint16": "H", "acc16": "H", "enum16": "H", "bitfield16": "H", 
+        "int32": "i", 
+        "uint32": "I", 
+        "acc32": "I", "enum32": "I", "bitfield32": "I", 
+        "int64": "q", 
+        "uint64": "Q", "acc64" : "Q",
+        "float32": 'f', 
+        "float64": 'd',
+        "sunssf": "h",
+        "count": "H" 
+        # string, ipaddr and, ipv6addr are handled separately
+     }    
+    
+    # @brief decodes the byte message based on the defintion passed in the Format string.
+    # @param definition: the format string to decode the message
     # if n is not specified, it defaults to 1
-    def __unpack_from(self, format, message):
-        result = []
-        while len(format) > 0:
-            n = 0
-
-            # decode number modifier
-            while len(format) > 0 and format[0] >= '0' and format[0] <= '9':
-                n = n * 10 + int(format[0])
-                format = format[1:]
-            if n == 0:
-                # apply default length modifier
-                n = 1
-
-            # determine the size of the data type (same logic as in struct.unpack)
-            nsize = self.__unpack_size.get(format[0])
-            if nsize is None:
-                raise ValueError("unknown format: " + format[0:])
-            invalid = self.__unpack_invalid.get(format[0])
-
-            # print (format[0], message[0:n*nsize])
-            
-            if format[0] == 's':
-                if message[1] == 0x80: # emtpy string
-                    result.append("")
-                else:
-                    result.append(self.__res_string(message[0:n]))
-            elif format[0] == 'B':
-                result += list(message[0:n*nsize])
-            elif format[0] == ' ' or format[0] == 'x':
-                # ignore blanks and padding (registers)
-                pass
-            else:
-                if format[0] == 'f':
-                    result_ = list(struct.unpack("<" + str(n) + format[0], self.__res_words(message[0:n*nsize])))
-                else:
-                    result_ = list(struct.unpack("!" + str(n) + format[0], bytes(message[0:n*nsize])))
-                for i in range(0, len(result_)):
-                    if result_[i] == invalid:
-                        result_[i] = None
-                result += result_
-            # next message chunk
-            format = format[1:]
-            message = message[n*nsize:]
+    def __Unpack(self, definition, message):
+        result = {}
+        for key in definition:
+            item_ = self.__DefinitionRegister._make(definition[key])
+            item_length = item_.length * 2
+            item_notimplemented = self.__UnpackNotImplemented.get(item_.type, None)
+            result_ = None
+            # print("1. item notimplemented: ", item_notimplemented, " item type: ", item_.type, " message : ", message)
+            if item_notimplemented == None or item_notimplemented != message[0:len(item_notimplemented)]:
+                try:
+                    struct_format = self.__UnpackStructFormat[item_.type]
+                    result_ = struct.unpack("<" + struct_format, self.__res_words(message[0:item_length]))
+                    if len(result_) == 1:
+                        result_ = result_[0]
+                except:
+                    if item_.type == "string":
+                        result_ = self.__res_string(message[0:item_length])
+                    elif item_.type =="ipaddr" or item_.type == "ipv6addr":
+                        result_ = message[0:item_length]
+                
+                if not result_ is None:
+                    result[item_.name] = result_
+            message = message[item_length:]
         return result
+       
 
     # @brief creates a modbus read register request message
     # @param MessageId: message ID (uint16)
@@ -184,22 +199,16 @@ class Modbus:
         if Message[2] != 0x00 or Message[3] != 0x00: # protocol ID
             return None
         messageLength = (Message[4] << 8) + Message[5]
-        if messageLength != len(Message) - 6:        # message length
+        if messageLength != len(Message) - 6:       # message length
             return None 
         if Message[6] != UnitId:                    # unit ID
             return None
         if Message[7] != 3:                         # function code 
             return None
         dataLength = Message[8]
-        if dataLength + 3 > messageLength:         # data length
+        if dataLength + 3 > messageLength:          # data length
             return None 
         Message = Message[9:]
-#        ## swap high and low byte
-#        result = []
-#        for i in range(0, len(Message), 2):
-#            result.append(Message[i + 1])
-#            result.append(Message[i])
-#        return result
         return Message
 
     # @todo support rs485
@@ -209,8 +218,9 @@ class Modbus:
     # @param Address: the address of the register to read
     # @param Format: the format string to decode the register value
     # @param Labels: the labels for the register values
-    def ReadRegister(self, UnitId, Address, Format, Labels):
-        formatsize = struct.calcsize(Format) >> 1
+    def ReadRegister(self, UnitId, Address, Definitions):
+        last_def = list(Definitions)[-1] 
+        formatsize = last_def + self.__DefinitionRegister._make(Definitions[last_def]).length
         messageId = 0x1248
         result = []
 
@@ -230,24 +240,28 @@ class Modbus:
             result += message
             formatsize -= chunk
             Address += chunk
-        # decode the result into network byte order
-        ## result = self.__res_bytes(result)
         #decode the byte message
-        values = self.__unpack_from(Format, result)
-        return dict(zip(Labels, values))
+        values = self.__Unpack(Definitions, result)
+        return values
 
-        
+    # @brief send a message via TCP        
     def tcp_send(self, Message):
         self.s.send(bytes(Message))
 
+    # @brief receive a message via TCP        
     def tcp_recv(self, Length):
         return self.s.recv(Length)
 
+    # @brief connect a TCP socket to the given IP and port
+    # @param ip: the IP address of the device
+    # @param port: the port of the device
+    # @param timeout: the timeout for the connection in seconds when receiving data or sending data        
     def tcp_connect(self, ip, port, timeout):
         self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.s.connect((ip, port))
         self.s.settimeout(timeout)
 
+    # @brief closes the TCP socket
     def tcp_close(self):
         self.s.close()
         self.s = None
@@ -259,7 +273,7 @@ class SunSpec(Modbus, SunSpec_Specification):
     # cache for the SunSpec blocks
     __sunspec_blocks_cache = { }
     #   data type for the SunSpec block definition      
-    SunSpecBlock = namedtuple("SunSpecBlock", ["BlockId", "Address", "Length"])
+    SunSpecBlock = namedtuple("SunSpecBlock", ["BlockId", "SubBlockId", "Address", "Length"])
 
     # @ brief Retrieves the SunSpec IDs and the length of the SunSpec blocks
     # the function returns a dictionary with the address as key and a tuple (blocktype, length) as value
@@ -284,7 +298,7 @@ class SunSpec(Modbus, SunSpec_Specification):
             return self.__sunspec_blocks_cache[Configuration_UnitID]; 
     
         Address = self.__sunspec_adresses[SunSpecAddressId]
-        message = self.ReadRegister(Configuration_UnitID, Address, "4s", ("C_SunSpec_ID", ))
+        message = self.ReadRegister(Configuration_UnitID, Address, {0: ('C_SunSpec_ID', 'string', 2)})
         if message is None:
             # stop if the message is None
             return None
@@ -297,14 +311,14 @@ class SunSpec(Modbus, SunSpec_Specification):
         result = []
         # process all SunSpec blocks until the end
         while Address < 0x10000:
-            message = self.ReadRegister(Configuration_UnitID, Address, "HH", ("C_SunSpec_DID", "C_SunSpec_Length"))
+            message = self.ReadRegister(Configuration_UnitID, Address, {0: ('C_SunSpec_DID', 'uint16', 1), 1: ('C_SunSpec_Length', 'uint16', 1)})
 
-            BlockId = message["C_SunSpec_DID"]
+            BlockId = message.get("C_SunSpec_DID", 0xffff) # id might be discared due to not implemented logic
             Length =  message["C_SunSpec_Length"]
             if Length == 0 or BlockId == 0xffff:
                 # end block reached
                 break
-            result.append(self.SunSpecBlock(BlockId, Address, Length))
+            result.append(self.SunSpecBlock(BlockId , 0, Address, Length))
             Address += Length + 2
 
         if(self.__sunspec_blocks_cache.get(Configuration_UnitID) is None):
@@ -316,11 +330,12 @@ class SunSpec(Modbus, SunSpec_Specification):
     # @param UnitId: the unit ID of the SunSpec device
     # @param Address: the address of the SunSpec block
     # @param BlockId: ID of the SunSpec block; specifies the SunSpec specification to use
-    def ReadBlock(self, UnitId, Address, BlockId):
-        BlockDef = SunSpec_Specification.Specification.get(BlockId)
+    def ReadBlock(self, UnitId, Address, BlockId, SubBlockId = 0):
+        BlockDef = SunSpec_Specification.Specification.get((BlockId, SubBlockId))
         if BlockDef is None:
             return None
-        return self.ReadRegister(UnitId, Address, BlockDef[1], list(map(lambda item: BlockDef[0] + "_" + item, BlockDef[2])))
+    #@@@ defblock[0] to be considered
+        return self.ReadRegister(UnitId, Address, BlockDef[1])
    
 class SolarEdge(SunSpec):
     # @brief reads the SolarEdge SmartMeter data for the given UnitId and SmartMeterId.
@@ -330,23 +345,101 @@ class SolarEdge(SunSpec):
         if SmartMeterId < 1 or SmartMeterId > 3:
             return None
         Address = (40121, 40295, 40469)[SmartMeterId - 1]
+   
         block = self.ReadRegister(UnitId, Address, 
-            "HH 32s32s16s16s32sH 4x 5h 9h 2h 5h 5h 5h 5h 8Lh 8Lh 16Lh H",  
-            ("C_SunSpec_DID", "C_SunSpec_Length",
-                "C_Manufacturer", "C_Model", "C_Option", "C_Version", "C_SerialNumber", "C_DeviceAddress",
-                "M_AC_Current", "M_AC_Current_A", "M_AC_Current_B", "M_AC_Current_C", "M_AC_Current_SF",
-                "M_AC_Voltage_L_N", "M_AC_Voltage_A_N", "M_AC_Voltage_B_N", "M_AC_Voltage_C_N", "M_AC_Voltage_L_N", "M_AC_Voltage_A_B", "M_AC_Voltage_B_C", "M_AC_Voltage_A_C", "M_AC_Voltage_SF",
-                "M_AC_Freq", "M_AC_Freq_SF",
-                "M_AC_Power", "M_AC_Power_A", "M_AC_Power_B", "M_AC_Power_C", "M_AC_Power_SF",
-                "M_AC_VA", "M_AC_VA_A", "M_AC_VA_B", "M_AC_VA_C", "M_AC_VA_SF",
-                "M_AC_VAR", "M_AC_VAR_A", "M_AC_VAR_B", "M_AC_VAR_C", "M_AC_VAR_SF",
-                "M_AC_PF", "M_AC_PF_A", "M_AC_PF_B", "M_AC_PF_C", "M_AC_PF_SF",
-                "M_Exported", "M_Exported_A", "M_Exported_B", "M_Exported_C", "M_Imported", "M_Imported_A", "M_Imported_B", "M_Imported_C", "M_Energy_WH_SF",
-                "M_Exported_VA", "M_Exported_VA_A", "M_Exported_VA_B", "M_Exported_VA_C", "M_Imported_VA", "M_Imported_VA_A", "M_Imported_VA_B", "M_Imported_VA_C", "M_Energy_VA_SF",
-                "M_Import_VARh_Q1", "M_Import_VARh_Q1a", "M_Import_VARh_Q1b", "M_Import_VARh_Q1c", "M_Import_VARh_Q2", "M_Import_VARh_Q2a", "M_Import_VARh_Q2b", "M_Import_VARh_Q2c",
-                "M_Import_VARh_Q3", "M_Import_VARh_Q3a", "M_Import_VARh_Q3b", "M_Import_VARh_Q3c", "M_Import_VARh_Q4", "M_Import_VARh_Q4a", "M_Import_VARh_Q4b", "M_Import_VARh_Q4c",
-                "M_Import_VAR_SF",
-                "M_Events"))
+            {0: ("C_SunSpec_DID", "uint16", 1),
+            1: ("C_SunSpec_Length", "uint16", 1),
+            2: ("C_Manufacturer", "string", 16),
+            18: ("C_Model", "string", 16),
+            34: ("C_Option", "string", 8),
+            42: ("C_Version", "string", 8),
+            50: ("C_SerialNumber", "string", 16),
+            66: ("C_DeviceAddress", "uint16", 1),
+
+            67: ("C_SunSpec_DID", "uint16", 1),
+            68: ("C_SunSpec_Length", "uint16", 1),
+             
+            69: ("M_AC_Current", "int16", 1),
+            70: ("M_AC_Current_A", "int16", 1),
+            71: ("M_AC_Current_B", "int16", 1),
+            72: ("M_AC_Current_C", "int16", 1),
+            73: ("M_AC_Current_SF", "sunssf", 1),
+             
+            74: ("M_AC_Voltage_L_N", "int16", 1),
+            75: ("M_AC_Voltage_A_N", "int16", 1),
+            76: ("M_AC_Voltage_B_N", "int16", 1),
+            77: ("M_AC_Voltage_C_N", "int16", 1),
+            78: ("M_AC_Voltage_L_N", "int16", 1),
+            79: ("M_AC_Voltage_A_B", "int16", 1),
+            80: ("M_AC_Voltage_B_C", "int16", 1),
+            81: ("M_AC_Voltage_A_C", "int16", 1),
+            82: ("M_AC_Voltage_SF", "sunssf", 1),
+             
+            83: ("M_AC_Freq", "int16", 1),
+            84: ("M_AC_Freq_SF", "sunssf", 1),
+             
+            85: ("M_AC_Power", "int16", 1),
+            86: ("M_AC_Power_A", "int16", 1),
+            87: ("M_AC_Power_B", "int16", 1),
+            88: ("M_AC_Power_C", "int16", 1),
+            89: ("M_AC_Power_SF", "sunssf", 1),
+             
+            90: ("M_AC_VA", "int16", 1),
+            91: ("C_AC_VA_A", "int16", 1),
+            92: ("M_AC_VA_B", "int16", 1),
+            93: ("M_AC_VA_C", "int16", 1),
+            94: ("M_AC_VA_SF", "sunssf", 1),
+             
+            95: ("M_AC_VAR", "int16", 1),
+            96: ("M_AC_VAR_A", "int16", 1),
+            97: ("M_AC_VAR_B", "int16", 1),
+            98: ("M_AC_VAR_C", "int16", 1),
+            99: ("M_AC_VAR_SF", "sunssf", 1),
+             
+            100: ("M_AC_PF", "int16", 1),
+            101: ("M_AC_PF_A", "int16", 1),
+            102: ("M_AC_PF_B", "int16", 1),
+            103: ("M_AC_PF_C", "int16", 1),
+            104: ("M_AC_PF_SF", "sunssf", 1),
+            
+            105: ("M_Exported", "uint32", 2),
+            107: ("M_Exported_A", "uint32", 2),
+            109: ("M_Exported_B", "uint32", 2),
+            111: ("M_Exported_C", "uint32", 2),
+            113: ("M_Imported", "uint32", 2),
+            115: ("M_Imported_A", "uint32", 2),
+            117: ("M_Imported_B", "uint32", 2),
+            119: ("M_Imported_C", "uint32", 2),
+            121: ("M_Energy_WH_SF", "sunssf", 1),
+             
+            122: ("M_Exported_VA", "uint32", 2),
+            124: ("M_Exported_VA_A", "uint32", 2),
+            126: ("M_Exported_VA_B", "uint32", 2),
+            128: ("M_Exported_VA_C", "uint32", 2),
+            130: ("M_Imported_VA", "uint32", 2),
+            132: ("M_Imported_VA_A", "uint32", 2),
+            134: ("M_Imported_VA_B", "uint32", 2),
+            136: ("M_Imported_VA_C", "uint32", 2),
+            138: ("M_Energy_VA_SF", "sunssf", 1),
+             
+            139: ("M_Import_VARh_Q1", "uint32", 2),
+            141: ("M_Import_VARh_Q1a", "uint32", 2),
+            143: ("M_Import_VARh_Q1b", "uint32", 2),
+            145: ("M_Import_VARh_Q1c", "uint32", 2),
+            147: ("M_Import_VARh_Q2", "uint32", 2),
+            149: ("M_Import_VARh_Q2a", "uint32", 2),
+            151: ("M_Import_VARh_Q2b", "uint32", 2),
+            153: ("M_Import_VARh_Q2c", "uint32", 2),
+            155: ("M_Import_VARh_Q3", "uint32", 2),
+            157: ("M_Import_VARh_Q3a", "uint32", 2),
+            159: ("M_Import_VARh_Q3b", "uint32", 2),
+            161: ("M_Import_VARh_Q3c", "uint32", 2),
+            163: ("M_Import_VARh_Q4", "uint32", 2),
+            165: ("M_Import_VARh_Q4a", "uint32", 2),
+            167: ("M_Import_VARh_Q4b", "uint32", 2),
+            169: ("M_Import_VARh_Q4c", "uint32", 2),
+            171: ("M_Import_VAR_SF", "sunssf", 1),
+            172: ("M_Events", "uint32", 2)})
         if block["C_Manufacturer"] == "":
             return None
         return block
@@ -358,21 +451,43 @@ class SolarEdge(SunSpec):
         if BatteryId < 1 or BatteryId > 2:
             return None
         Address = (0xE100, 0xE200)[BatteryId - 1]
+
         block1 = self.ReadRegister(UnitId, Address, 
-            "32s32s32s32sH",  
-            ("C_Manufacturer", "C_Model", "C_Version", "C_SerialNumber", "C_DeviceAddress"))
+            {
+            0: ("C_Manufacturer", "string", 16),
+            16: ("C_Model", "string", 16),
+            32: ("C_Version", "string", 16),
+            44: ("C_SerialNumber", "string", 16),
+            64: ("C_DeviceAddress", "uint16", 1),
+            })
         if block1["C_Manufacturer"] == "":
             return None
-        block2 = self.ReadRegister(UnitId, Address + 0x42, 
-            "5f 64x 5f QQ 4f xBxxL 8H8H",  
-            ("RatedEnergy", "MaxChargeContinuesPower", "MaxDischargeContinuesPower", "MaxChargePeakPower", "MaxDischargePeakPower",
-                "AverageTemperature", "MaxTemperature", "InstantaneousVoltage", "InstantaneousCurrent", "InstantaneousPower",
-                "LifetimeExportEnergyCounter", "LifetimeImportEnergyCounter",
-                "MaxEnergy", "AvailableEngergy", "StateOfHealth", "StateOfEnergy",
-                "Status", "StatusInternal", "EventLog0", 
-                "EventLog1", "EventLog2", "EventLog3", "EventLog4", "EventLog5", "EventLog6", "EventLog7",
-                "EventLogInternal0", "EventLogInternal1", "EventLogInternal2", "EventLogInternal3",
-                "EventLogInternal4", "EventLogInternal5", "EventLogInternal6", "EventLogInternal7"))
+        # unfortunatley the gap between the blocks can't be read, so we have to read the second 
+        # block separately
+        block2 = self.ReadRegister(UnitId, Address + 0x42,
+            {
+              0: ("RatedEnergy", "float32", 2),
+              2: ("MaxChargeContinuesPower", "float32", 2),
+              4: ("MaxDischargeContinuesPower", "float32", 2),
+              6: ("MaxChargePeakPower", "float32", 2),
+              8: ("MaxDischargePeakPower", "float32", 2),
+              10: ("Reserved", "pad", 32),
+              42: ("AverageTemperature", "float32", 2),
+              44: ("MaxTemperature", "float32", 2),
+              46: ("InstantaneousVoltage", "float32", 2),
+              48: ("InstantaneousCurrent", "float32", 2),
+              50: ("InstantaneousPower", "float32", 2),
+              52: ("LifetimeExportEnergyCounter", "uint64", 4),
+              56: ("LifetimeImportEnergyCounter", "uint64", 4),
+              60: ("MaxEnergy", "float32", 2),
+              62: ("AvailableEngergy", "float32", 2),
+              64: ("StateOfHealth", "float32", 2),
+              66: ("StateOfEnergy", "float32", 2),
+              68: ("Status", "uint32", 2),
+              70: ("StatusInternal", "uint32", 2),
+              72: ("EventLog", "8unit16", 8),
+              80: ("EventLogInternal0", "uint16", 8)
+            }) 
         return block1 | block2
 
     # @brief reads the SolarEdge Grid Protection Trip Limits data for the given UnitId.
@@ -380,10 +495,48 @@ class SolarEdge(SunSpec):
     def GridProtectionTripLimits(self, UnitId):
         Address = 0xF602
         block = self.ReadRegister(UnitId, Address, 
-            "fLfLfLfLfL fLfLfLfLfL fLfLfLfLfL fLfLfLfLfL L",  
-            ("VgMax1", "VgMax1_HoldTime", "VgMax2", "VgMax2_HoldTime", "VgMax3", "VgMax3_HoldTime", "VgMax4", "VgMax4_HoldTime", "VgMax5", "VgMax5_HoldTime",
-            "VgMin1", "VgMin1_HoldTime", "VgMin2", "VgMin2_HoldTime", "VgMin3", "VgMin3_HoldTime", "VgMin4", "VgMin4_HoldTime", "VgMin5", "VgMin5_HoldTime",
-            "FgMax1", "FgMax1_HoldTime", "FgMax2", "FgMax2_HoldTime", "FgMax3", "FgMax3_HoldTime", "FgMax4", "FgMax4_HoldTime", "FgMax5", "FgMax5_HoldTime",    
-            "FgMin1", "FgMin1_HoldTime", "FgMin2", "FgMin2_HoldTime", "FgMin3", "FgMin3_HoldTime", "FgMin4", "FgMin4_HoldTime", "FgMin5", "FgMin5_HoldTime",
-            "GRM_Time" ))
+            {
+                0: ("VgMax1", "float32", 2),
+                2: ("VgMax1_HoldTime", "uint32", 2),
+                4: ("VgMax2", "float32", 2),
+                6: ("VgMax2_HoldTime", "uint32", 2),
+                8: ("VgMax3", "float32", 2),
+                10: ("VgMax3_HoldTime", "uint32", 2),
+                12: ("VgMax4", "float32", 2),
+                14: ("VgMax4_HoldTime", "uint32", 2),
+                16: ("VgMax5", "float32", 2),
+                18: ("VgMax5_HoldTime", "uint32", 2),
+                20: ("VgMin1", "float32", 2),
+                22: ("VgMin1_HoldTime", "uint32", 2),
+                24: ("VgMin2", "float32", 2),
+                26: ("VgMin2_HoldTime", "uint32", 2),
+                28: ("VgMin3", "float32", 2),
+                30: ("VgMin3_HoldTime", "uint32", 2),
+                32: ("VgMin4", "float32", 2),
+                34: ("VgMin4_HoldTime", "uint32", 2),
+                36: ("VgMin5", "float32", 2),
+                38: ("VgMin5_HoldTime", "uint32", 2),
+                40: ("FgMax1", "float32", 2),
+                42: ("FgMax1_HoldTime", "uint32", 2),
+                44: ("FgMax2", "float32", 2),
+                46: ("FgMax2_HoldTime", "uint32", 2),
+                48: ("FgMax3", "float32", 2),
+                50: ("FgMax3_HoldTime", "uint32", 2),
+                52: ("FgMax4", "float32", 2),
+                54: ("FgMax4_HoldTime", "uint32", 2),
+                56: ("FgMax5", "float32", 2),
+                58: ("FgMax5_HoldTime", "uint32", 2),
+                60: ("FgMin1", "float32", 2),
+                62: ("FgMin1_HoldTime", "uint32", 2),
+                64: ("FgMin2", "float32", 2),
+                66: ("FgMin2_HoldTime", "uint32", 2),
+                68: ("FgMin3", "float32", 2),
+                70: ("FgMin3_HoldTime", "uint32", 2),
+                72: ("FgMin4", "float32", 2),
+                74: ("FgMin4_HoldTime", "uint32", 2),
+                76: ("FgMin5", "float32", 2),
+                78: ("FgMin5_HoldTime", "uint32", 2),
+                80: ("GRM_Time", "uint32", 2),
+            }
+        )
         return block
