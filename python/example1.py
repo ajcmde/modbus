@@ -52,20 +52,26 @@ if True:
 if True:
     print("SolarEdge SmartMeter 1")
     print(tcpmodbus.SmartMeter(Configuration_UnitID, 1))
+    print("------------------------------")
     print("SolarEdge SmartMeter 2")
     print(tcpmodbus.SmartMeter(Configuration_UnitID, 2))
+    print("------------------------------")
     print("SolarEdge SmartMeter 3")
     print(tcpmodbus.SmartMeter(Configuration_UnitID, 3))
+    print("------------------------------")
 
 if True:
     print("SolarEdge Battery 1")
     print(tcpmodbus.Battery(Configuration_UnitID, 1))
-if False:    
+    print("------------------------------")
+if True:    
     print("SolarEdge Battery 2")
     print(tcpmodbus.Battery(Configuration_UnitID, 2))
+    print("------------------------------")
 
 if True:
     print ("SolarEdge Grid Protection Trip Limits")
     print(tcpmodbus.GridProtectionTripLimits(Configuration_UnitID))
+    print("------------------------------")
 
 tcpmodbus.tcp_close()
