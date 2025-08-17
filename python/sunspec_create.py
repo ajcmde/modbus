@@ -69,90 +69,50 @@ for zipinfo in zipfile.infolist():
     jsonobj = json.loads(file.read().decode())
     file.close()
     
-    types = ""
-    names = []
+    specs = {}
     count = 0
+    offset = 0
+ 
+
+    def AppendCode(code, specs, id, subid, group_name):
+        if code != "":
+            code += ",\n"
+        code += "\t(" + str(id) + ", " + str(subid) + ")"
+        code += ": (\"" + str(group_name) 
+        code += "\", " + str(specs) 
+        code += ")" 
+        return code
 
     print("group id:", jsonobj["id"], ", group name:", jsonobj["group"]["name"])
 
-    grouping = jsonobj["group"]["points"]
-    round = 1
-    while grouping is not None:
+    subid = 0
+    count = 0
+    while subid <= count:
+        if subid == 0:
+            grouping = jsonobj["group"]["points"]
+        else:
+            grouping = jsonobj["group"]["groups"][subid - 1]["points"]
         for point in grouping:
             type = point["type"]
-            size = 1
             if point["size"] > 1:
                 size = point["size"]
-            if type == "int16" or type == "sunssf":
-                type = "h"
-            elif type == "uint16" or type == "bitfield16" or type == "enum16" or type == "acc16" or type == "raw16":
-                type = "H"
-            elif type == "int32":
-                type = "l"
-                size /= 2
-            elif type == "uint32" or type == "bitfield32" or type == "acc32" or type == "enum32":
-                type = "L"
-                size /= 2
-            elif type == "int64":
-                type = "q"
-                size /= 4
-            elif type == "uint64" or type == "acc64" or type == "bitfield64":
-                type = "Q"
-                size /= 4
-            elif type == "float32":
-                type = "f"
-                size >>= 2
-            elif type == "string":
-                type = "s"
-                size <<= 1 
-            elif type == "pad":
-                type = "x"
-            elif type == "eui48":
-                type = "c"
-                size *= 3
-            elif type == "ipv6addr":
-                type = "c"
-                size *= 16
-            elif type == "ipaddr":
-                type = "c"
-                size *= 4
-            elif type == "count":
-                type = "_"
-                if round == 2:
-                    raise Exception("nested group are not supported")
-                if size > 1:
-                    raise Exception("count field with size > 1 not supported")
-                size >>= 1 
-                count = 1
             else:
-                print("unknown type:", point["type"])
-                exit()  
-            if size > 1:
-                types += str(size)
-            types += type
+                size = 1
+            if type == "count":
+                count += 1
             if "units" in point:
                 units = "[" + point["units"] + "]"
             else:
                 units = ""
-            names.append(point["name"] + units) 
-        if count == 1 and round == 1:
-            # add padding for count
-            types += "_"
-            names.append("")
-            grouping = jsonobj["group"]["groups"][0]["points"]
-            count = 0
-            round = 2
-        else:
-            grouping = None   
 
-    if code != "":
-        code += ",\n"
-    code += "\t" + str(jsonobj["id"]) 
-    code += ": (\"" + jsonobj["group"]["name"] 
-    code += "\", \"" + types 
-    code += "\", [\"" + "\", \"".join(names) + "\"])" 
+            specs[offset] = (point["name"] + units, type, size)
+            offset += size
+
+        code = AppendCode(code, specs, jsonobj["id"], subid, jsonobj["group"]["name"])
+        subid += 1
+
 
 code = "# created by sunspec_create.py (" + str(current_utc_time) + ")\n# source https://github.com/sunspec/models/tree/master/json \n# Copyright and Trademark: SunpSpec Alliance: Apache License https://github.com/sunspec/models/blob/master/LICENSE \n\nclass SunSpec_Specification:\n\tSpecification = {\n" + code + "}\n"
-fd = os.open(os.path.dirname(os.path.abspath(__file__)) + "/sunspec_specification.py", os.O_CREAT | os.O_WRONLY, 0o666)
+fd = os.open(os.path.dirname(os.path.abspath(__file__)) + "/sunspec_specification.py", os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o666)
 os.write(fd, code.encode())
 os.close(fd)
